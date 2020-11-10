@@ -1,0 +1,7 @@
+# terraform files
+.terraform/
+terraform.*
+*.tfplan
+
+# editor tmp files
+*.swp

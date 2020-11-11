@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import threading

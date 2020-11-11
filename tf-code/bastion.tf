@@ -21,7 +21,7 @@ resource "aws_instance" "bastion" {
 	instance_type = "t3a.nano"
 
 	vpc_security_group_ids = [aws_security_group.bastion.id]
-	key_name = "zestAI-dev"
+	key_name = "web-server-demo-dev"
 
 	# needs a public IP for ssh access
 	associate_public_ip_address = true
@@ -32,7 +32,7 @@ resource "aws_instance" "bastion" {
 	tags = merge(var.common_tags,
 			{
 				role = "SSH bastion",
-				Name = "zestAI-ssh-dev"
+				Name = "ssh-bastion-dev"
 			}
 		)
 	}
@@ -48,7 +48,7 @@ resource "aws_eip" "bastion" {
 }
 
 resource "aws_security_group" "bastion" {
-	name = "zestAI-bastion-sg"
+	name = "ssh-bastion-sg"
 	description = "SG for bastion"
 	vpc_id = module.vpc.vpc_id
 	tags = merge(var.common_tags,

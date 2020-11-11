@@ -1,7 +1,7 @@
-# variables for the zest AI demo VPC
+# variables for the web server demo VPC
 variable "vpc_name" {
 	type = string
-	default = "zestAI_DEV"
+	default = "web-server-DEV"
 }
 
 variable "vpc_cidr" {
@@ -39,6 +39,11 @@ variable "vpc_pub_subnets" {
 	]
 }
 
+variable "instance_type" {
+    type = string
+    default = "t3a.nano"
+}
+
 variable common_tags {
 	type = map
 
@@ -46,7 +51,7 @@ variable common_tags {
         provisioned = "terraform"
         environment = "DEV"
         owner = "allen-myers"
-        purpose = "ZestAI demo"
+        purpose = "web-server demo"
     }
 }
 

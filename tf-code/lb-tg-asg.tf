@@ -1,17 +1,15 @@
 resource "aws_lb" "lb-ext" {
     name               = "lb-web-server-dev"
-    availability_zones = var.vpc_azs
     internal           = false
     load_balancer_type = "application"
     security_groups    = [aws_security_group.lb-ext-sg.id]
-    subnets            = module.vpc.aws_subnet.public.*
+    subnets            = module.vpc.public_subnets.*
 
     enable_deletion_protection = true
-    ip_address_type = ipv4
 
-    access_logs = {
+    access_logs {
         bucket = aws_s3_bucket.lb-log-bucket.id
-        prefix = "lb-web-server-dev"
+        prefix = "lb-logs"
         enabled = true
     }
 
@@ -26,7 +24,6 @@ resource "aws_lb_listener" "lb-ext-listener" {
     load_balancer_arn = aws_lb.lb-ext.arn
     port              = 80
     protocol          = "HTTP"
-    ssl_policy        = "ELBSecurityPolicy-2016-08"
 
     default_action {
         type             = "forward"
@@ -66,7 +63,7 @@ resource "aws_security_group_rule" "lb-ext-sg-ingress" {
     description       = "allow ingress to ext LB on port 80 from allowed CIDRs"
     from_port         = 80
     to_port           = 80
-    protocol          = "HTTP"
+    protocol          = "tcp"
     cidr_blocks       = var.vpc_default_ingress_cidr_blocks
     security_group_id = aws_security_group.lb-ext-sg.id
 }
@@ -82,14 +79,15 @@ resource "aws_security_group_rule" "lb-ext-sg-egress" {
 }
 
 resource "aws_s3_bucket" "lb-log-bucket" {
-    bucket = "lb-log-bucket-web-server-demo"
-    acl    = "log-delivery-write"
+    bucket = "lb-logs-web-server-dev"
+    acl    = "private"
+    policy = file("log-bucket-policy.json")
 
     tags = var.common_tags
 }
 
 resource "aws_s3_bucket_public_access_block" "lb-log-bucket-no-public" {
-    bucket = aws_s3_bucket.example.id
+    bucket = aws_s3_bucket.lb-log-bucket.id
 
     # lock it down
     block_public_acls   = true
@@ -104,22 +102,19 @@ resource "aws_lb_target_group" "tg-web-server" {
     vpc_id   = module.vpc.vpc_id
 }
 
-resource "aws_lb_target_group_attachment" "tg-web-server" {
-}
-
 resource "aws_autoscaling_group" "asg-web-server" {
     name                      = "asg-web-server-dev"
     launch_configuration      = aws_launch_configuration.lc-web-server.name
-    min_size                  = 1
-    desired_size              = 1
-    max_size                  = 2
+    min_size                  = 3
+    desired_capacity          = 3
+    max_size                  = 12
     health_check_grace_period = 60
     health_check_type         = "ELB"
     force_delete              = true
     vpc_zone_identifier       = module.vpc.private_subnets.*
     target_group_arns         = [aws_lb_target_group.tg-web-server.arn]
     default_cooldown          = 150
-    termination_policies      = [OldestInstance]
+    termination_policies      = ["OldestInstance", "Default"]
 
 
     lifecycle {
@@ -127,12 +122,28 @@ resource "aws_autoscaling_group" "asg-web-server" {
     }
 }
 
+data "aws_ami" "web-server" {
+        most_recent = true
+
+        filter {
+                name   = "name"
+                values = ["web-server-golden-*"]
+        }
+
+        filter {
+                name   = "virtualization-type"
+                values = ["hvm"]
+        }
+
+        owners = ["540656036051"] # Canonical
+}
+
 resource "aws_launch_configuration" "lc-web-server" {
-    name          = "lc-web-server-dev"
-    image_id      = data.aws_ami.ubuntu.id
+    name_prefix   = "lc-web-server-dev-"
+    image_id      = data.aws_ami.web-server.id
     instance_type = var.instance_type
-    key_name = "zestAI-dev"
-    security_groups = [aws_security_group.web-server-sg.id]
+    key_name = "web-server-demo-dev"
+    security_groups = [aws_security_group.web-server.id]
 
     lifecycle {
         create_before_destroy = true
@@ -141,11 +152,10 @@ resource "aws_launch_configuration" "lc-web-server" {
 
 resource "aws_autoscaling_policy" "asg-scale-up" {
     name                   = "asg-scale-up-web-server"
-    policy_type            = SimpleScaling
+    policy_type            = "SimpleScaling"
     adjustment_type        = "ChangeInCapacity"
     scaling_adjustment     = 1
     cooldown               = 300
-    estimated_instance_warmup = 30
     autoscaling_group_name = aws_autoscaling_group.asg-web-server.name
 }
 
@@ -169,11 +179,10 @@ resource "aws_cloudwatch_metric_alarm" "avgcpu-high" {
 
 resource "aws_autoscaling_policy" "asg-scale-down" {
     name                   = "asg-scale-down-web-server"
-    policy_type            = SimpleScaling
+    policy_type            = "SimpleScaling"
     adjustment_type        = "ChangeInCapacity"
     scaling_adjustment     = -1
     cooldown               = 300
-    estimated_instance_warmup = 30
     autoscaling_group_name = aws_autoscaling_group.asg-web-server.name
 }
 
@@ -196,33 +205,43 @@ resource "aws_cloudwatch_metric_alarm" "avgcpu-low" {
 }
 
 resource "aws_security_group" "web-server" {
-    name = "zestAI-bastion-sg"
-    description = "SG for bastion"
+    name = "web-server-sg"
+    description = "SG for web-server"
     vpc_id = module.vpc.vpc_id
     tags = merge(var.common_tags,
             {
-                role = "SG for SSH bastion"
+                role = "SG for web-server"
             }
         )
 }
 
-resource "aws_security_group_rule" "web-server-ingress-service-port" {
+resource "aws_security_group_rule" "web-server-ingress-service-port-from-lb" {
     type              = "ingress"
-    description       = "allow ingress to web-server from the ext LB and bastion on the service port"
+    description       = "allow ingress to web-server from the ext LB on the service port"
     from_port         = 40080
     to_port           = 40080
-    protocol          = "HTTP"
-    source_security_group_ids = [aws_security_group.lb-ext-sg.id, aws_security_group.bastion.id]
+    protocol          = "tcp"
+    source_security_group_id = aws_security_group.lb-ext-sg.id
+    security_group_id = aws_security_group.web-server.id
+}
+
+resource "aws_security_group_rule" "web-server-ingress-service-port-from-bastion" {
+    type              = "ingress"
+    description       = "allow ingress to web-server from the bastion on the service port"
+    from_port         = 40080
+    to_port           = 40080
+    protocol          = "tcp"
+    source_security_group_id = aws_security_group.bastion.id
     security_group_id = aws_security_group.web-server.id
 }
 
 resource "aws_security_group_rule" "web-server-ingress-ssh" {
     type              = "ingress"
-    description       = "allow ingress to bastion on all tcp from allowed CIDRs"
+    description       = "allow ingress to web-server on ssh port from ssh bastion"
     from_port         = 22
     to_port           = 22
-    protocol          = "SSH"
-    source_security_group_ids = []
+    protocol          = "tcp"
+    source_security_group_id = aws_security_group.bastion.id
     security_group_id = aws_security_group.web-server.id
 }
 

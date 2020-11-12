@@ -187,7 +187,7 @@ resource "aws_autoscaling_policy" "asg-scale-down" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "avgcpu-low" {
-    alarm_name = "avgcpu-high-agents"
+    alarm_name = "avgcpu-low-agents"
     comparison_operator = "LessThanOrEqualToThreshold"
     evaluation_periods = "5"
     metric_name = "CPUUtilization"
